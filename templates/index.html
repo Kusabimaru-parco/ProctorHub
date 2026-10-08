@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proctor Hub - Professor Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<div class="container mt-5">
+    <h3 class="mb-4 fw-bold">🛡️ Local Proctoring Hub</h3>
+
+    <!-- Create Session Card -->
+    <div id="setupCard" class="card shadow-sm mb-4 {% if session.is_active %}d-none{% endif %}">
+        <div class="card-header bg-dark text-white"><h5 class="mb-0">Create Exam Session</h5></div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label fw-bold">Exam / Class Name</label>
+                <input type="text" id="sessionName" class="form-control" placeholder="e.g., BSIT 1-1 Computer Programming">
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-bold">Google Forms Link</label>
+                <input type="url" id="formLink" class="form-control" placeholder="https://docs.google.com/forms/...">
+            </div>
+            <button class="btn btn-primary w-100 fw-bold py-2" onclick="startSession()">Start Exam Session</button>
+        </div>
+    </div>
+
+    <!-- Active Live Session Card -->
+    <div id="liveSessionCard" class="card shadow-sm border-success {% if not session.is_active %}d-none{% endif %}">
+        <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">🟢 Live Exam Session</h5>
+            <button class="btn btn-sm btn-danger fw-bold" id="endBtn" onclick="endSession()">🛑 End Exam & Export Excel</button>
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info d-flex justify-content-between align-items-center mb-3">
+                <span><strong>Student Portal Link:</strong> <span id="publicUrlText" class="user-select-all">{{ session.public_url }}/student</span></span>
+                <button class="btn btn-sm btn-outline-primary" onclick="copyLink()">Copy Link</button>
+            </div>
+            
+            <table class="table table-hover align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Student Name</th>
+                        <th>Student ID</th>
+                        <th>Status</th>
+                        <th>Violations</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody id="studentTableBody">
+                    <tr><td colspan="5" class="text-center text-muted">Waiting for students to connect...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    let pollInterval = null;
+
+    async function startSession() {
+        const sessionName = document.getElementById('sessionName').value.trim();
+        const formLink = document.getElementById('formLink').value.trim();
+        if (!sessionName || !formLink) return alert("Please fill in both fields.");
+
+        const res = await fetch('/api/create_session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_name: sessionName, form_link: formLink })
+        });
+        const data = await res.json();
+        
+        if (data.status === "success") {
+            document.getElementById('setupCard').classList.add('d-none');
+            document.getElementById('liveSessionCard').classList.remove('d-none');
+            document.getElementById('publicUrlText').innerText = data.public_url + "/student";
+            startPolling();
+        }
+    }
+
+    async function endSession() {
+        if (!confirm("End the exam? This will close the tunnel and download the complete Excel report.")) return;
+        
+        const btn = document.getElementById('endBtn');
+        btn.disabled = true;
+        btn.innerText = "Exporting Excel...";
+
+        try {
+            const res = await fetch('/api/end_session', { method: 'POST' });
+            if (!res.ok) throw new Error("Export failed");
+
+            // Direct browser download of Excel file
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Exam_Report_${new Date().toISOString().slice(0, 10)}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+
+            clearInterval(pollInterval);
+            alert("Exam session ended. Excel report downloaded.");
+            window.location.reload();
+        } catch (err) {
+            alert("Error ending exam and exporting file.");
+            btn.disabled = false;
+        }
+    }
+
+    function copyLink() {
+        navigator.clipboard.writeText(document.getElementById('publicUrlText').innerText);
+        alert("Link copied to clipboard!");
+    }
+
+    async function fetchLiveData() {
+        try {
+            const res = await fetch('/api/live_data');
+            const data = await res.json();
+            const tbody = document.getElementById('studentTableBody');
+            
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Waiting for students to connect...</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = "";
+            data.forEach(s => {
+                const statusBadge = s.status === 'completed' 
+                    ? '<span class="badge bg-secondary">Finished</span>' 
+                    : '<span class="badge bg-success">In Exam</span>';
+                const vBadge = s.violations > 0 ? "bg-danger" : "bg-success";
+                const rowClass = s.violations > 0 ? "table-danger" : "";
+                
+                tbody.innerHTML += `
+                    <tr class="${rowClass}">
+                        <td class="fw-bold">${s.name}</td>
+                        <td>${s.student_id}</td>
+                        <td>${statusBadge}</td>
+                        <td><span class="badge ${vBadge} fs-6">${s.violations}</span></td>
+                        <td class="small">${s.details}</td>
+                    </tr>
+                `;
+            });
+        } catch (e) {}
+    }
+
+    function startPolling() {
+        pollInterval = setInterval(fetchLiveData, 3000);
+    }
+
+    if (!document.getElementById('liveSessionCard').classList.contains('d-none')) {
+        startPolling();
+    }
+
+    // 1. Keep-alive heartbeat every 2 seconds
+    setInterval(() => {
+        fetch('/api/host_ping', { method: 'POST' }).catch(() => {});
+    }, 2000);
+
+    // 2. Immediate shutdown signal when tab is closed
+    window.addEventListener('beforeunload', () => {
+        navigator.sendBeacon('/api/host_shutdown');
+    });
+</script>
+</body>
+</html>

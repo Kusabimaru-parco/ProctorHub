@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exam Entry Portal</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body, html { height: 100%; margin: 0; background: #f8f9fa; }
+        #examFrame { width: 100%; height: calc(100vh - 60px); border: none; }
+        .top-bar {
+            height: 60px;
+            background: #212529;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+        }
+        .step-badge {
+            width: 28px;
+            height: 28px;
+            background: #0d6efd;
+            color: #fff;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85rem;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="desktopContainer">
+    {% if not session_active %}
+    <div class="container py-5 text-center">
+        <div class="card p-5 shadow-sm border-warning">
+            <h4 class="text-warning fw-bold">⚠️ No Active Session</h4>
+            <p class="text-muted mb-0">The professor has not launched the exam session yet or it has concluded.</p>
+        </div>
+    </div>
+    {% else %}
+
+    <!-- Prep and Registration Screen -->
+    <div id="prepScreen" class="container py-4">
+        <div class="row justify-content-center">
+            <div class="col-12 col-md-8 col-lg-6">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-dark text-white p-3">
+                        <span class="badge bg-primary float-end">Proctored Session</span>
+                        <h5 class="mb-0">{{ session_name }}</h5>
+                    </div>
+                    <div class="card-body p-4">
+
+                        <!-- STEP 1: Download & Run Agent -->
+                        <div class="mb-4 pb-3 border-bottom">
+                            <h6 class="fw-bold d-flex align-items-center">
+                                <span class="step-badge">1</span> Download & Run Proctor Agent
+                            </h6>
+                            <p class="text-muted small mb-2">
+                                Download and run the executable. This portal will automatically detect when it starts.
+                            </p>
+                            <button class="btn btn-primary w-100 fw-bold py-2" onclick="downloadAgent()">
+                                📥 Download Proctor Agent (.exe)
+                            </button>
+
+                            <!-- SmartScreen Instructions Accordion -->
+                            <div class="mt-3 text-start">
+                                <button class="btn btn-sm btn-outline-warning w-100 fw-semibold text-dark" type="button" data-bs-toggle="collapse" data-bs-target="#smartScreenGuide">
+                                    ⚠️ Seeing "Windows protected your PC"? Click for visual guide
+                                </button>
+                                <div class="collapse mt-2" id="smartScreenGuide">
+                                    <div class="card card-body bg-light border-warning small">
+                                        <p class="mb-2"><strong>How to bypass Microsoft Defender SmartScreen:</strong></p>
+                                        <ol class="ps-3 mb-2">
+                                            <li>Click <strong>More info</strong> under the blue warning prompt.</li>
+                                            <li>Click the <strong>Run anyway</strong> button at the bottom.</li>
+                                        </ol>
+                                        <img src="{{ url_for('static', filename='smartscreen_guide.png') }}" 
+                                             alt="Windows SmartScreen Run Anyway Guide" 
+                                             class="img-fluid rounded border shadow-sm">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Live Agent Detector Status -->
+                            <div id="agentStatusCard" class="alert alert-secondary d-flex align-items-center mt-3 py-2 small mb-0">
+                                <span class="spinner-border spinner-border-sm me-2 text-primary" id="statusSpinner"></span>
+                                <span id="statusText">Waiting for ProctorAgent to launch on this PC...</span>
+                            </div>
+                        </div>
+
+                        <!-- STEP 2: Fill Details (Locked until Step 1 complete) -->
+                        <div>
+                            <h6 class="fw-bold d-flex align-items-center text-muted" id="step2Header">
+                                <span class="step-badge bg-secondary" id="step2Badge">2</span> Enter Student Details
+                            </h6>
+                            <fieldset id="detailsFieldset" disabled>
+                                <div class="mb-2">
+                                    <label class="form-label small fw-semibold">Full Name</label>
+                                    <input type="text" id="sName" class="form-control form-control-sm" required placeholder="Juan Dela Cruz">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small fw-semibold">Student ID</label>
+                                    <input type="text" id="sId" class="form-control form-control-sm" required placeholder="2023-10024">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label small fw-semibold">Email Address</label>
+                                    <input type="email" id="sEmail" class="form-control form-control-sm" required placeholder="student@univ.edu">
+                                </div>
+                                <button class="btn btn-success w-100 py-2 fw-bold" id="startExamBtn" onclick="startExamSession()">
+                                    🚀 Start Exam Workspace
+                                </button>
+                            </fieldset>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Fullscreen-like Exam Viewport -->
+    <div id="examViewport" class="d-none">
+        <div class="top-bar">
+            <div>
+                <span class="badge bg-danger me-2">LIVE PROCTORING</span>
+                <span class="fw-bold">{{ session_name }}</span>
+                <span class="text-muted ms-2">| Student ID: <strong id="displaySid" class="text-white"></strong></span>
+            </div>
+            <div class="d-flex align-items-center gap-3">
+                <span id="submissionStatus" class="small text-warning">⏳ Submit form below to unlock finish button</span>
+                <button id="finishBtn" class="btn btn-secondary btn-sm fw-bold px-3" disabled onclick="finishExamAndClose()">
+                    Finish Exam & Close Proctor
+                </button>
+            </div>
+        </div>
+        <iframe id="examFrame" src=""></iframe>
+    </div>
+
+    {% endif %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const sessionUrl = "{{ session_url }}";
+    const rawFormLink = "{{ form_link }}";
+
+    let clientToken = sessionStorage.getItem("clientToken") || Math.random().toString(36).substring(2, 10);
+    sessionStorage.setItem("clientToken", clientToken);
+
+    let isAgentLive = false;
+    let pollInterval = null;
+    let studentId = "";
+    let iframeLoadCount = 0;
+
+    function downloadAgent() {
+        if (sessionUrl) {
+            const payload = `${sessionUrl}###${clientToken}`;
+            navigator.clipboard.writeText(payload).catch(() => {});
+        }
+        window.location.href = '/download/agent';
+    }
+
+    async function pollAgentStatus() {
+        if (isAgentLive) return;
+
+        try {
+            const res = await fetch(`/api/check_agent_live?token=${clientToken}`);
+            const data = await res.json();
+
+            if (data.is_live) {
+                isAgentLive = true;
+                clearInterval(pollInterval);
+
+                const card = document.getElementById('agentStatusCard');
+                card.className = "alert alert-success d-flex align-items-center mt-3 py-2 small mb-0";
+                document.getElementById('statusSpinner').classList.add('d-none');
+                document.getElementById('statusText').innerHTML = "<strong>✅ Proctor Agent detected running!</strong> Details unlocked.";
+
+                document.getElementById('detailsFieldset').disabled = false;
+                document.getElementById('step2Header').className = "fw-bold d-flex align-items-center text-dark";
+                document.getElementById('step2Badge').className = "step-badge bg-primary";
+            }
+        } catch (e) {}
+    }
+
+    pollInterval = setInterval(pollAgentStatus, 1500);
+
+    async function startExamSession() {
+        const name = document.getElementById('sName').value.trim();
+        const sid = document.getElementById('sId').value.trim();
+        const email = document.getElementById('sEmail').value.trim();
+
+        if (!name || !sid || !email) {
+            return alert("Please fill in all student details.");
+        }
+
+        const res = await fetch('/api/start_exam', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name, student_id: sid, email: email, token: clientToken })
+        });
+        const data = await res.json();
+
+        if (data.status !== 'success') {
+            return alert(data.message || "Failed to start exam.");
+        }
+
+        studentId = sid;
+        document.getElementById('displaySid').innerText = studentId;
+
+        let embedUrl = rawFormLink;
+        if (embedUrl.includes("docs.google.com/forms")) {
+            embedUrl = embedUrl.replace(/\/viewform.*$/, '/viewform?embedded=true');
+        }
+
+        document.getElementById('prepScreen').classList.add('d-none');
+        document.getElementById('examViewport').classList.remove('d-none');
+
+        const frame = document.getElementById('examFrame');
+        frame.addEventListener('load', () => {
+            iframeLoadCount++;
+            if (iframeLoadCount >= 2) {
+                const btn = document.getElementById('finishBtn');
+                btn.disabled = false;
+                btn.className = "btn btn-success btn-sm fw-bold px-3 shadow";
+
+                const status = document.getElementById('submissionStatus');
+                status.className = "small text-success fw-bold";
+                status.innerText = "✅ Form submitted! Click button to finish.";
+            }
+        });
+        frame.src = embedUrl;
+    }
+
+    async function finishExamAndClose() {
+        if (!confirm("Finish exam session? This will immediately close the background proctor agent.")) return;
+
+        try {
+            const res = await fetch('/api/finish_student', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ student_id: studentId })
+            });
+            const data = await res.json();
+
+            if (data.status === 'success') {
+                alert("Exam completed! Background agent has been closed.");
+                window.location.reload();
+            } else {
+                alert(data.message || "Could not finish session.");
+            }
+        } catch (e) {
+            alert("Error communicating with server.");
+        }
+    }
+</script>
+</body>
+</html>
