@@ -30,7 +30,7 @@ A free Ngrok Account (required to establish public tunnels outside your local ne
 Clone the repository:
 
 Bash
-git clone https://github.com/your-username/ProctorHub.git
+git clone https://github.com/Kusabimaru-parco/ProctorHub.git
 cd ProctorHub
 Install dependencies:
 
@@ -44,12 +44,7 @@ Run the following command in PowerShell/CMD:
 
 Bash
 python -c "from pyngrok import ngrok; ngrok.set_auth_token('YOUR_NGROK_TOKEN_HERE')"
-(Optional) Compile the Master Agent:
-If you modify proctor_agent.py or want to update the embedded logo.ico, recompile the master binary:
 
-PowerShell
-python -m PyInstaller --onefile --noconsole --icon=logo.ico proctor_agent.py
-Move the resulting dist\proctor_agent.exe to static/MasterAgent.exe.
 
 3. Launching an Exam Session
 Double-click Start_Hub.bat (or run python hub.py).
