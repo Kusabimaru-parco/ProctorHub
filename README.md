@@ -1,3 +1,48 @@
+# 🛡️ ProctorHub: Lightweight Exam Proctoring System
+
+**ProctorHub** is a exam proctoring system designed for academic institutions and independent professors. It links a local Flask control server with a portable Windows desktop agent to enforce exam integrity during Google Forms assessments.
+
+Designed for frictionless deployment, it features a one-click auto-installer, disconnection-proof networking, and strict window monitoring—without requiring commercial licenses or paid code-signing certificates.
+
+---
+
+
+
+## ✨ Key Features
+
+* **One-Click Auto-Setup:** Instructors just double-click `Start_Hub.bat`. The script automatically verifies Python, installs missing dependencies, and opens the dashboard in the browser.
+* **Disconnection-Proof Architecture:** Utilizes Ngrok Static Domains and local JSON state persistence. If your Wi-Fi drops or the server restarts, the exam session restores instantly without kicking students out.
+* **Continuous Session Workflow:** Ending an exam exports the Excel report immediately and returns you to the session creation screen without shutting down the server.
+* **Strict Window Allowlist:** The desktop agent explicitly blocks all applications except the official exam portal and the rules window. Switching to another browser tab, ChatGPT, Word, or PDFs flags an immediate violation.
+* **Zero-PIN Auto-Pairing:** Students do not type IP addresses or PIN codes. Downloading the agent securely passes a background token that auto-links the `.exe` to their browser session within seconds.
+* **Anti-Tamper Watchdog:** If a student forcefully closes the background proctor via the **X** button or Task Manager during an exam, the server logs a critical termination violation.
+
+---
+---
+## Screenshots
+### Host View
+### Setting up account
+<img width="1198" height="582" alt="image" src="https://github.com/user-attachments/assets/b7e2ff78-747c-47fc-959e-80a058595ae6" />
+
+### Setting up session
+<img width="1169" height="427" alt="image" src="https://github.com/user-attachments/assets/81f69793-9a7b-45d9-9df4-7ee097faf30e" />
+
+### Live exam session
+<img width="1137" height="550" alt="image" src="https://github.com/user-attachments/assets/edcbd961-f038-4391-9cdb-d1720339cb3a" />
+
+### Student View
+1. Student's view after clicking the link
+   <img width="597" height="612" alt="image" src="https://github.com/user-attachments/assets/1f89b25b-e0f1-4312-b7bd-17b603210e22" />
+
+2. The Proctor Agent 
+   <img width="517" height="447" alt="image" src="https://github.com/user-attachments/assets/0a11f73c-fc51-40df-889f-81ae18ef4f2a" />
+
+3. Exam View
+   <img width="1342" height="632" alt="image" src="https://github.com/user-attachments/assets/c8913d97-a9f1-4529-bcd6-a26462f2d347" />
+
+---
+
+---
 ## 🚀 Instructor Setup & Usage Guide
 
 ### 1. Prerequisites
