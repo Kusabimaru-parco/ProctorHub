@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProctorHub - Setup</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<div class="container py-5">
+    <div class="text-center mb-4">
+        <h2 class="fw-bold">🛡️ ProctorHub Server Setup</h2>
+        <p class="text-muted">Connect your local system to the internet to allow students to join.</p>
+    </div>
+
+    <div class="row justify-content-center">
+        <!-- Configuration Form -->
+        <div class="col-12 col-lg-5 mb-4">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-primary text-white p-3">
+                    <h5 class="mb-0">1. Server Configuration</h5>
+                </div>
+                <div class="card-body p-4">
+                    <form id="setupForm" onsubmit="startServer(event)">
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">Ngrok Auth Token <span class="text-danger">*</span></label>
+                            <input type="password" id="ngrokToken" class="form-control" required placeholder="e.g. 2bX9... (paste token here)">
+                            <div class="form-text">Required to open the internet tunnel.</div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">Static Domain <span class="badge bg-success small">Recommended</span></label>
+                            <input type="text" id="ngrokDomain" class="form-control" placeholder="e.g. upward-grizzly.ngrok-free.app">
+                            <div class="form-text text-success">Prevents the URL from changing if your internet drops.</div>
+                        </div>
+
+                        <button type="submit" id="connectBtn" class="btn btn-primary w-100 fw-bold py-2">
+                            Connect & Start Server
+                        </button>
+                    </form>
+                    <div id="errorMsg" class="alert alert-danger mt-3 d-none small"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Instructions Panel -->
+        <div class="col-12 col-lg-7 mb-4">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-dark text-white p-3">
+                    <h5 class="mb-0">📖 How to get your keys (100% Free)</h5>
+                </div>
+                <div class="card-body p-4">
+                    <h6 class="fw-bold text-primary">Step 1: Get your Auth Token</h6>
+                    <ol class="small text-muted mb-4">
+                        <li>Create a free account at <a href="https://ngrok.com" target="_blank">ngrok.com</a>.</li>
+                        <li>On the left dashboard menu, click <strong>Your Authtoken</strong>.</li>
+                        <li>Copy the token and paste it into the form on the left.</li>
+                    </ol>
+
+                    <h6 class="fw-bold text-success">Step 2: Make it Disconnection-Proof (Static Domain)</h6>
+                    <ol class="small text-muted mb-0">
+                        <li>In your Ngrok dashboard, click <strong>Domains</strong> in the left menu (under Endpoints) or visit <a href="https://dashboard.ngrok.com/domains" target="_blank">dashboard.ngrok.com/domains</a>.</li>
+                        <li>Click the blue <strong>New Domain</strong> or <strong>Create Domain</strong> button.</li>
+                        <li>Ngrok will instantly generate a permanent domain for you (e.g., <em>lion-pleasing.ngrok-free.app</em>).</li>
+                        <li>Copy that exact domain and paste it into the Static Domain field on the left.</li>
+                        <li><em>Why?</em> If your Wi-Fi disconnects and reconnects, students won't be kicked out because your URL remains identical!</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Auto-load saved keys when the page opens
+    window.addEventListener('DOMContentLoaded', () => {
+        const savedToken = localStorage.getItem('proctorhub_ngrok_token');
+        const savedDomain = localStorage.getItem('proctorhub_ngrok_domain');
+        
+        if (savedToken) document.getElementById('ngrokToken').value = savedToken;
+        if (savedDomain) document.getElementById('ngrokDomain').value = savedDomain;
+    });
+
+    async function startServer(e) {
+        e.preventDefault();
+        const btn = document.getElementById('connectBtn');
+        const err = document.getElementById('errorMsg');
+        btn.disabled = true;
+        btn.innerText = "Connecting...";
+        err.classList.add('d-none');
+
+        const token = document.getElementById('ngrokToken').value.trim();
+        const domain = document.getElementById('ngrokDomain').value.trim();
+
+        // Save keys to browser storage so they are remembered next time
+        localStorage.setItem('proctorhub_ngrok_token', token);
+        localStorage.setItem('proctorhub_ngrok_domain', domain);
+
+        try {
+            const res = await fetch('/api/init_server', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: token, domain: domain })
+            });
+            const data = await res.json();
+
+            if (data.status === 'success') {
+                window.location.reload(); 
+            } else {
+                err.innerText = data.message || "Failed to start Ngrok. Check your token or domain formatting.";
+                err.classList.remove('d-none');
+                btn.disabled = false;
+                btn.innerText = "Connect & Start Server";
+            }
+        } catch (error) {
+            err.innerText = "Server error. Ensure the python script is running.";
+            err.classList.remove('d-none');
+            btn.disabled = false;
+            btn.innerText = "Connect & Start Server";
+        }
+    }
+</script>
+</body>
+</html>

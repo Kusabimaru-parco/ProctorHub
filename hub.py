@@ -3,16 +3,23 @@ import sys
 import re
 import io
 import time
+import json
 import threading
 import webbrowser
 import pandas as pd
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, send_file
-from pyngrok import ngrok
+from pyngrok import ngrok, conf
 
 app = Flask(__name__)
 
-# --- IN-MEMORY STATE ---
+# --- STATE PERSISTENCE ---
+STATE_FILE = "proctor_state.json"
+
+server_globals = {
+    "ngrok_running": False
+}
+
 active_agents = {}
 active_session = {
     "is_active": False,
@@ -23,12 +30,37 @@ active_session = {
     "logs": []
 }
 
+def save_state():
+    """Saves the current session data to a file so it survives server crashes."""
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump({
+                "session": active_session,
+                "agents": active_agents
+            }, f)
+    except Exception as e:
+        print(f"[!] Error saving state: {e}")
+
+def load_state():
+    """Restores session data if the server was restarted unexpectedly."""
+    global active_session, active_agents
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                data = json.load(f)
+                active_session.update(data.get("session", {}))
+                active_agents.update(data.get("agents", {}))
+                print("[*] Previous session state loaded successfully.")
+        except Exception:
+            pass
+
+load_state()
+
 # --- HOST TAB WATCHDOG ---
 last_host_ping = time.time()
 dashboard_opened = False
 
 def host_watchdog():
-    """Terminates Python and ngrok if the professor closes the dashboard browser tab."""
     global last_host_ping, dashboard_opened
     while True:
         time.sleep(2)
@@ -52,17 +84,43 @@ def host_ping():
 
 @app.route('/api/host_shutdown', methods=['POST'])
 def host_shutdown():
-    print("\n[*] Direct shutdown signal received from host tab. Exiting...")
     try:
         ngrok.kill()
     except Exception:
         pass
     os._exit(0)
 
-# --- PORTAL & DASHBOARD PAGES ---
+# --- PORTAL & SETUP PAGES ---
 @app.route('/')
-def professor_dashboard():
+def index_router():
+    # Show setup page every time the script is launched until connected
+    if not server_globals["ngrok_running"]:
+        return render_template('setup.html')
     return render_template('index.html', session=active_session)
+
+@app.route('/api/init_server', methods=['POST'])
+def init_server():
+    """Called by setup.html to configure the tunnel."""
+    token = request.json.get('token', '').strip()
+    domain = request.json.get('domain', '').strip()
+
+    if not token:
+        return jsonify({"status": "error", "message": "Auth token is required."}), 400
+
+    try:
+        ngrok.set_auth_token(token)
+        if domain:
+            tunnel = ngrok.connect(5000, domain=domain)
+        else:
+            tunnel = ngrok.connect(5000)
+            
+        active_session['public_url'] = tunnel.public_url
+        server_globals["ngrok_running"] = True
+        save_state()
+        print(f"[*] Live Tunnel Established: {active_session['public_url']}")
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
 
 @app.route('/student')
 def student_portal():
@@ -84,23 +142,16 @@ def create_session():
     active_session['students'] = []
     active_session['logs'] = []
     active_agents.clear()
-
-    if not active_session['public_url']:
-        tunnel = ngrok.connect(5000)
-        active_session['public_url'] = tunnel.public_url
-        print(f"[*] Live Tunnel: {active_session['public_url']}")
-
+    save_state()
     return jsonify({"status": "success", "public_url": active_session['public_url']})
 
 @app.route('/download/agent')
 def download_agent():
     master_path = os.path.join(app.root_path, 'static', 'MasterAgent.exe')
     if not os.path.exists(master_path):
-        return "MasterAgent.exe missing from static folder. Please compile it first.", 404
-
+        return "MasterAgent.exe missing. Please place it in the static folder.", 404
     clean_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', active_session['name'])
-    clean_filename = f"ProctoredExam_{clean_title}.exe"
-    return send_file(master_path, as_attachment=True, download_name=clean_filename)
+    return send_file(master_path, as_attachment=True, download_name=f"ProctoredExam_{clean_title}.exe")
 
 # --- AGENT AUTO-HANDSHAKE & HEARTBEAT ---
 @app.route('/api/agent_checkin', methods=['POST'])
@@ -108,17 +159,11 @@ def agent_checkin():
     token = request.json.get("token", "").strip() if request.json else ""
     if not token or not active_session['is_active']:
         return jsonify({"status": "error"}), 400
-
     if token not in active_agents:
-        active_agents[token] = {
-            "status": "waiting",
-            "student_id": None,
-            "last_seen": time.time(),
-            "closed_flagged": False
-        }
+        active_agents[token] = {"status": "waiting", "student_id": None, "last_seen": time.time(), "closed_flagged": False}
     else:
         active_agents[token]["last_seen"] = time.time()
-
+    save_state()
     return jsonify({"status": "success"})
 
 @app.route('/api/check_agent_live', methods=['GET'])
@@ -136,11 +181,8 @@ def start_exam():
     email = data.get("email", "").strip()
     token = data.get("token", "").strip()
 
-    if not name or not sid or not token:
-        return jsonify({"status": "error", "message": "Missing required fields."}), 400
-
-    if token not in active_agents:
-        return jsonify({"status": "error", "message": "Proctor agent not detected on this machine."}), 400
+    if not name or not sid or not token or token not in active_agents:
+        return jsonify({"status": "error", "message": "Invalid request or agent missing."}), 400
 
     active_agents[token]["status"] = "active"
     active_agents[token]["student_id"] = sid
@@ -148,25 +190,19 @@ def start_exam():
     existing = next((s for s in active_session['students'] if s['student_id'] == sid), None)
     if not existing:
         active_session['students'].append({
-            "name": name,
-            "student_id": sid,
-            "email": email,
-            "token": token,
-            "status": "in_progress"
+            "name": name, "student_id": sid, "email": email, "token": token, "status": "in_progress"
         })
     else:
-        existing["status"] = "in_progress"
-        existing["token"] = token
-
+        existing.update({"status": "in_progress", "token": token})
+    save_state()
     return jsonify({"status": "success", "form_link": active_session['form_link']})
 
 @app.route('/api/agent_heartbeat', methods=['POST'])
 def agent_heartbeat():
-    data = request.json or {}
-    token = data.get("token", "").strip()
-
+    token = (request.json or {}).get("token", "").strip()
     if token in active_agents:
         active_agents[token]["last_seen"] = time.time()
+        # Do not save_state here to prevent writing to disk every 2 seconds
         return jsonify({
             "status": active_agents[token]["status"],
             "student_id": active_agents[token]["student_id"],
@@ -176,17 +212,17 @@ def agent_heartbeat():
 
 @app.route('/api/finish_student', methods=['POST'])
 def finish_student():
-    sid = request.json.get('student_id', '').strip() if request.json else ""
+    sid = (request.json or {}).get('student_id', '').strip()
     for s in active_session['students']:
         if s['student_id'] == sid:
             s['status'] = 'completed'
-            token = s.get('token')
-            if token and token in active_agents:
-                active_agents[token]["status"] = "completed"
+            if s.get('token') in active_agents:
+                active_agents[s['token']]["status"] = "completed"
+            save_state()
             return jsonify({"status": "success"})
     return jsonify({"status": "error", "message": "Student not found."}), 404
 
-# --- VIOLATION LOGGING & MONITORING ---
+# --- VIOLATION LOGGING ---
 @app.route('/log', methods=['POST'])
 def log_violation():
     data = request.json or {}
@@ -196,6 +232,7 @@ def log_violation():
         return jsonify({"status": "ignored"}), 200
 
     active_session['logs'].append(data)
+    save_state()
     return jsonify({"status": "success"}), 200
 
 @app.route('/api/live_data', methods=['GET'])
@@ -211,19 +248,17 @@ def live_data():
                 sid = info["student_id"]
                 if sid:
                     active_session['logs'].append({
-                        "student_id": sid,
-                        "category": "Agent Terminated",
+                        "student_id": sid, "category": "Agent Terminated",
                         "details": "[CRITICAL] Proctor agent was closed or process terminated during exam",
                         "timestamp": datetime.utcnow().isoformat() + "Z"
                     })
+                    save_state()
 
     rows = []
     for s in active_session['students']:
         s_logs = [l for l in active_session['logs'] if l.get('student_id') == s['student_id']]
         rows.append({
-            "name": s['name'],
-            "student_id": s['student_id'],
-            "status": s.get('status', 'in_progress'),
+            "name": s['name'], "student_id": s['student_id'], "status": s.get('status', 'in_progress'),
             "violations": len(s_logs),
             "details": " | ".join(set([l['details'] for l in s_logs])) if s_logs else "None"
         })
@@ -232,15 +267,13 @@ def live_data():
 @app.route('/api/end_session', methods=['POST'])
 def end_session():
     active_session['is_active'] = False
+    save_state()
     report = []
     for s in active_session['students']:
         s_logs = [l for l in active_session['logs'] if l.get('student_id') == s['student_id']]
         report.append({
-            "Student Name": s['name'],
-            "Student ID": s['student_id'],
-            "Email": s['email'],
-            "Status": s.get('status', 'completed').title(),
-            "Total Violations": len(s_logs),
+            "Student Name": s['name'], "Student ID": s['student_id'], "Email": s['email'],
+            "Status": s.get('status', 'completed').title(), "Total Violations": len(s_logs),
             "Violation Details": "\n".join([f"[{l.get('timestamp', '')}] {l['details']}" for l in s_logs]) if s_logs else "Clean"
         })
 
@@ -250,16 +283,12 @@ def end_session():
         df.to_excel(writer, index=False, sheet_name="Exam Report")
     output.seek(0)
 
-    if active_session['public_url']:
-        ngrok.kill()
-        active_session['public_url'] = ""
+    # The Ngrok tunnel is no longer killed here.
+    # This allows the page to reload directly back to the "Create Exam Session" card.
 
-    filename = f"Exam_Report_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
     return send_file(
-        output,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        as_attachment=True,
-        download_name=filename
+        output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True, download_name=f"Exam_Report_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
     )
 
 if __name__ == '__main__':

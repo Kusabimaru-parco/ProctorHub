@@ -9,7 +9,10 @@
 <body class="bg-light">
 
 <div class="container mt-5">
-    <h3 class="mb-4 fw-bold">🛡️ Local Proctoring Hub</h3>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="fw-bold mb-0">🛡️ Local Proctoring Hub</h3>
+        <span class="badge bg-success">Server Online</span>
+    </div>
 
     <!-- Create Session Card -->
     <div id="setupCard" class="card shadow-sm mb-4 {% if session.is_active %}d-none{% endif %}">
@@ -58,6 +61,10 @@
 </div>
 
 <script>
+    // Tab watchdog implementation
+    setInterval(() => { fetch('/api/host_ping', { method: 'POST' }).catch(() => {}); }, 2000);
+    window.addEventListener('beforeunload', () => { navigator.sendBeacon('/api/host_shutdown'); });
+
     let pollInterval = null;
 
     async function startSession() {
@@ -91,7 +98,6 @@
             const res = await fetch('/api/end_session', { method: 'POST' });
             if (!res.ok) throw new Error("Export failed");
 
-            // Direct browser download of Excel file
             const blob = await res.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -155,16 +161,6 @@
     if (!document.getElementById('liveSessionCard').classList.contains('d-none')) {
         startPolling();
     }
-
-    // 1. Keep-alive heartbeat every 2 seconds
-    setInterval(() => {
-        fetch('/api/host_ping', { method: 'POST' }).catch(() => {});
-    }, 2000);
-
-    // 2. Immediate shutdown signal when tab is closed
-    window.addEventListener('beforeunload', () => {
-        navigator.sendBeacon('/api/host_shutdown');
-    });
 </script>
 </body>
 </html>
