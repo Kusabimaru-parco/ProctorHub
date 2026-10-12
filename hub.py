@@ -31,7 +31,6 @@ active_session = {
 }
 
 def save_state():
-    """Saves the current session data to a file so it survives server crashes."""
     try:
         with open(STATE_FILE, "w") as f:
             json.dump({
@@ -42,7 +41,6 @@ def save_state():
         print(f"[!] Error saving state: {e}")
 
 def load_state():
-    """Restores session data if the server was restarted unexpectedly."""
     global active_session, active_agents
     if os.path.exists(STATE_FILE):
         try:
@@ -56,34 +54,10 @@ def load_state():
 
 load_state()
 
-# --- HOST TAB WATCHDOG ---
-last_host_ping = time.time()
-dashboard_opened = False
-
-def host_watchdog():
-    global last_host_ping, dashboard_opened
-    while True:
-        time.sleep(2)
-        if dashboard_opened and (time.time() - last_host_ping > 7):
-            print("\n[*] Professor dashboard tab closed. Shutting down ProctorHub...")
-            try:
-                ngrok.kill()
-            except Exception:
-                pass
-            os._exit(0)
-
-threading.Thread(target=host_watchdog, daemon=True).start()
-
-# --- HOST HEARTBEAT ROUTES ---
-@app.route('/api/host_ping', methods=['POST'])
-def host_ping():
-    global last_host_ping, dashboard_opened
-    dashboard_opened = True
-    last_host_ping = time.time()
-    return jsonify({"status": "ok"})
-
-@app.route('/api/host_shutdown', methods=['POST'])
-def host_shutdown():
+# --- MANUAL SERVER SHUTDOWN ---
+@app.route('/api/shutdown_server', methods=['POST'])
+def shutdown_server():
+    print("\n[*] Server shutdown initiated by professor. Exiting...")
     try:
         ngrok.kill()
     except Exception:
@@ -93,14 +67,12 @@ def host_shutdown():
 # --- PORTAL & SETUP PAGES ---
 @app.route('/')
 def index_router():
-    # Show setup page every time the script is launched until connected
     if not server_globals["ngrok_running"]:
         return render_template('setup.html')
     return render_template('index.html', session=active_session)
 
 @app.route('/api/init_server', methods=['POST'])
 def init_server():
-    """Called by setup.html to configure the tunnel."""
     token = request.json.get('token', '').strip()
     domain = request.json.get('domain', '').strip()
 
@@ -202,7 +174,6 @@ def agent_heartbeat():
     token = (request.json or {}).get("token", "").strip()
     if token in active_agents:
         active_agents[token]["last_seen"] = time.time()
-        # Do not save_state here to prevent writing to disk every 2 seconds
         return jsonify({
             "status": active_agents[token]["status"],
             "student_id": active_agents[token]["student_id"],
@@ -282,9 +253,6 @@ def end_session():
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name="Exam Report")
     output.seek(0)
-
-    # The Ngrok tunnel is no longer killed here.
-    # This allows the page to reload directly back to the "Create Exam Session" card.
 
     return send_file(
         output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
